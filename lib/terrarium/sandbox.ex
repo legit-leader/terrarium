@@ -29,6 +29,7 @@ defmodule Terrarium.Sandbox do
           state: map()
         }
 
+  @derive {JSON.Encoder, only: [:id, :provider, :state]}
   @enforce_keys [:id, :provider]
   defstruct [:id, :provider, state: %{}]
 

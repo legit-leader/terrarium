@@ -8,7 +8,7 @@ defmodule Terrarium.MixProject do
     [
       app: :terrarium,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
