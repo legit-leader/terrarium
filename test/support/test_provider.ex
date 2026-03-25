@@ -30,4 +30,7 @@ defmodule Terrarium.TestProvider do
 
   @impl true
   def ls(_sandbox, _path), do: {:ok, ["file1.txt", "file2.txt"]}
+
+  @impl true
+  def ssh_opts(_sandbox), do: {:ok, [host: "test.example.com", port: 22, user: "root", auth: nil]}
 end

@@ -33,6 +33,10 @@ defmodule Terrarium.Provider do
 
   Providers that don't support file operations can skip `read_file/2`, `write_file/3`,
   and `ls/2` — they will return `{:error, :not_supported}` by default.
+
+  Providers that support SSH access can implement `ssh_opts/1` to return connection
+  parameters. This enables consumers like Helmsman to establish Erlang distribution
+  over SSH for running BEAM nodes inside sandboxes.
   """
 
   alias Terrarium.Sandbox
@@ -89,6 +93,44 @@ defmodule Terrarium.Provider do
   """
   @callback ls(sandbox :: Sandbox.t(), path :: String.t()) :: {:ok, [String.t()]} | {:error, term()}
 
+  @type ssh_opts :: [
+          host: String.t(),
+          port: non_neg_integer(),
+          user: String.t(),
+          auth: auth()
+        ]
+
+  @type auth ::
+          {:password, String.t()}
+          | {:key, String.t()}
+          | {:key_path, String.t()}
+          | {:user_dir, String.t()}
+          | nil
+
+  @doc """
+  Returns SSH connection parameters for the sandbox.
+
+  Providers that support SSH access implement this callback to return the
+  host, port, user, and authentication details needed to open an SSH connection
+  to the sandbox. This is useful for consumers that need direct SSH access,
+  for example to establish Erlang distribution over SSH using `:peer`.
+
+  ## Return value
+
+  A keyword list with the following keys:
+
+  - `:host` — hostname or IP address
+  - `:port` — SSH port (typically 22)
+  - `:user` — SSH username
+  - `:auth` — authentication method, one of:
+    - `{:password, password}` — password authentication
+    - `{:key, pem_string}` — PEM-encoded private key
+    - `{:key_path, path}` — path to a private key file
+    - `{:user_dir, path}` — directory containing SSH keys
+    - `nil` — use default key discovery
+  """
+  @callback ssh_opts(sandbox :: Sandbox.t()) :: {:ok, ssh_opts()} | {:error, term()}
+
   @doc """
   Reconnects to an existing sandbox after client restart.
 
@@ -101,7 +143,7 @@ defmodule Terrarium.Provider do
   """
   @callback reconnect(sandbox :: Sandbox.t()) :: {:ok, Sandbox.t()} | {:error, term()}
 
-  @optional_callbacks [read_file: 2, write_file: 3, ls: 2]
+  @optional_callbacks [read_file: 2, write_file: 3, ls: 2, ssh_opts: 1]
 
   @doc false
   defmacro __using__(_opts) do
@@ -126,7 +168,10 @@ defmodule Terrarium.Provider do
       @impl true
       def ls(_sandbox, _path), do: {:error, :not_supported}
 
-      defoverridable reconnect: 1, read_file: 2, write_file: 3, ls: 2
+      @impl true
+      def ssh_opts(_sandbox), do: {:error, :not_supported}
+
+      defoverridable reconnect: 1, read_file: 2, write_file: 3, ls: 2, ssh_opts: 1
     end
   end
 end
