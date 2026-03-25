@@ -8,7 +8,7 @@ defmodule Terrarium.MixProject do
     [
       app: :terrarium,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       docs: docs(),
@@ -23,7 +23,7 @@ defmodule Terrarium.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger, :ssh]
     ]
   end
 
@@ -32,6 +32,12 @@ defmodule Terrarium.MixProject do
 
   defp deps do
     [
+      # Command execution with child process shutdown propagation
+      {:muontrap, "~> 1.7"},
+
+      # Telemetry
+      {:telemetry, "~> 1.0"},
+
       # Development & Testing
       {:quokka, "~> 2.12", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
@@ -49,12 +55,15 @@ defmodule Terrarium.MixProject do
       groups_for_modules: [
         Core: [
           Terrarium,
-          Terrarium.Sandbox
+          Terrarium.Sandbox,
+          Terrarium.Telemetry
         ],
         Behaviours: [
-          Terrarium.Provider,
-          Terrarium.Process,
-          Terrarium.FileSystem
+          Terrarium.Provider
+        ],
+        Providers: [
+          Terrarium.Providers.Local,
+          Terrarium.Providers.SSH
         ]
       ]
     ]

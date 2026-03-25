@@ -9,16 +9,32 @@ defmodule Terrarium do
 
   ## Architecture
 
-  Terrarium defines three behaviours that providers implement:
+  Terrarium defines a single `Terrarium.Provider` behaviour that covers lifecycle
+  management, command execution, and file operations. Providers implement this
+  behaviour to integrate with platforms like Daytona, E2B, Modal, Fly Sprites, and others.
 
-  - `Terrarium.Provider` — lifecycle management (create, destroy, status)
-  - `Terrarium.Process` — command execution within sandboxes
-  - `Terrarium.FileSystem` — file operations within sandboxes
+  ## Configuration
+
+  Configure multiple providers and set a default:
+
+      config :terrarium,
+        default: :daytona,
+        providers: [
+          daytona: {Terrarium.Daytona, api_key: System.fetch_env!("DAYTONA_API_KEY")},
+          e2b: {Terrarium.E2B, api_key: System.fetch_env!("E2B_API_KEY")},
+          local: Terrarium.Providers.Local
+        ]
 
   ## Usage
 
-      # Create a sandbox
-      {:ok, sandbox} = Terrarium.create(MyApp.Sandbox.Daytona, image: "debian:12", resources: %{cpu: 2, memory: 4})
+      # Uses the default provider
+      {:ok, sandbox} = Terrarium.create(image: "debian:12")
+
+      # Uses a named provider
+      {:ok, sandbox} = Terrarium.create(:e2b, image: "debian:12")
+
+      # Uses an explicit provider module
+      {:ok, sandbox} = Terrarium.create(Terrarium.Daytona, image: "debian:12", api_key: "...")
 
       # Execute commands
       {:ok, result} = Terrarium.exec(sandbox, "echo hello")
@@ -34,7 +50,16 @@ defmodule Terrarium do
   alias Terrarium.Sandbox
 
   @doc """
-  Creates a new sandbox using the given provider.
+  Creates a new sandbox.
+
+  Can be called in three ways:
+
+  - `Terrarium.create(opts)` — uses the configured default provider
+  - `Terrarium.create(:name, opts)` — uses a named provider from config
+  - `Terrarium.create(ProviderModule, opts)` — uses the module directly
+
+  Provider-specific options from config are merged with call-site opts,
+  with call-site opts taking precedence.
 
   ## Options
 
@@ -42,25 +67,72 @@ defmodule Terrarium do
 
   - `:image` — the base image for the sandbox
   - `:resources` — CPU, memory, and disk configuration
+  - `:provider` — inline provider as a module or `{module, opts}` tuple
 
   ## Examples
 
+      {:ok, sandbox} = Terrarium.create(image: "debian:12")
+      {:ok, sandbox} = Terrarium.create(:e2b, image: "debian:12")
       {:ok, sandbox} = Terrarium.create(MyProvider, image: "debian:12")
   """
-  @spec create(module(), keyword()) :: {:ok, Sandbox.t()} | {:error, term()}
-  def create(provider, opts \\ []) do
-    provider.create(opts)
+  @spec create(module() | atom() | keyword(), keyword()) :: {:ok, Sandbox.t()} | {:error, term()}
+  def create(provider_or_opts \\ [], opts \\ [])
+
+  def create(name, opts) when is_atom(name) and name != nil do
+    {config, opts} = Keyword.pop(opts, :config)
+    {provider, provider_opts} = resolve_named_or_module(name, config)
+
+    Terrarium.Telemetry.span(:create, %{provider: provider}, fn ->
+      provider.create(Keyword.merge(provider_opts, opts))
+    end)
+  end
+
+  def create(opts, []) when is_list(opts) do
+    {config, opts} = Keyword.pop(opts, :config)
+    {provider, provider_opts, opts} = resolve_from_opts(opts, config)
+
+    Terrarium.Telemetry.span(:create, %{provider: provider}, fn ->
+      provider.create(Keyword.merge(provider_opts, opts))
+    end)
   end
 
   @doc """
   Creates a new sandbox, raising on error.
   """
-  @spec create!(module(), keyword()) :: Sandbox.t()
-  def create!(provider, opts \\ []) do
-    case create(provider, opts) do
+  @spec create!(module() | atom() | keyword(), keyword()) :: Sandbox.t()
+  def create!(provider_or_opts \\ [], opts \\ [])
+
+  def create!(name, opts) when is_atom(name) and name != nil do
+    case create(name, opts) do
       {:ok, sandbox} -> sandbox
       {:error, reason} -> raise "Failed to create sandbox: #{inspect(reason)}"
     end
+  end
+
+  def create!(opts, []) when is_list(opts) do
+    case create(opts) do
+      {:ok, sandbox} -> sandbox
+      {:error, reason} -> raise "Failed to create sandbox: #{inspect(reason)}"
+    end
+  end
+
+  @doc """
+  Reconnects to an existing sandbox after client restart.
+
+  Use this after restoring a sandbox from `Terrarium.Sandbox.from_map/1` to
+  verify the sandbox is still alive and refresh any transient state.
+
+  ## Examples
+
+      data = MyStore.load("sandbox-123")
+      sandbox = Terrarium.Sandbox.from_map(data)
+      {:ok, sandbox} = Terrarium.reconnect(sandbox)
+  """
+  @spec reconnect(Sandbox.t()) :: {:ok, Sandbox.t()} | {:error, term()}
+  def reconnect(%Sandbox{provider: provider} = sandbox) do
+    Terrarium.Telemetry.span(:reconnect, %{sandbox: sandbox}, fn ->
+      provider.reconnect(sandbox)
+    end)
   end
 
   @doc """
@@ -72,7 +144,9 @@ defmodule Terrarium do
   """
   @spec destroy(Sandbox.t()) :: :ok | {:error, term()}
   def destroy(%Sandbox{provider: provider} = sandbox) do
-    provider.destroy(sandbox)
+    Terrarium.Telemetry.span(:destroy, %{sandbox: sandbox}, fn ->
+      provider.destroy(sandbox)
+    end)
   end
 
   @doc """
@@ -85,7 +159,9 @@ defmodule Terrarium do
   """
   @spec status(Sandbox.t()) :: Terrarium.Provider.status()
   def status(%Sandbox{provider: provider} = sandbox) do
-    provider.status(sandbox)
+    Terrarium.Telemetry.span(:status, %{sandbox: sandbox}, fn ->
+      provider.status(sandbox)
+    end)
   end
 
   @doc """
@@ -104,7 +180,9 @@ defmodule Terrarium do
   """
   @spec exec(Sandbox.t(), String.t(), keyword()) :: {:ok, Terrarium.Process.Result.t()} | {:error, term()}
   def exec(%Sandbox{provider: provider} = sandbox, command, opts \\ []) do
-    provider.exec(sandbox, command, opts)
+    Terrarium.Telemetry.span(:exec, %{sandbox: sandbox, command: command}, fn ->
+      provider.exec(sandbox, command, opts)
+    end)
   end
 
   @doc """
@@ -116,7 +194,9 @@ defmodule Terrarium do
   """
   @spec read_file(Sandbox.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%Sandbox{provider: provider} = sandbox, path) do
-    provider.read_file(sandbox, path)
+    Terrarium.Telemetry.span(:read_file, %{sandbox: sandbox, path: path}, fn ->
+      provider.read_file(sandbox, path)
+    end)
   end
 
   @doc """
@@ -128,7 +208,9 @@ defmodule Terrarium do
   """
   @spec write_file(Sandbox.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%Sandbox{provider: provider} = sandbox, path, content) do
-    provider.write_file(sandbox, path, content)
+    Terrarium.Telemetry.span(:write_file, %{sandbox: sandbox, path: path}, fn ->
+      provider.write_file(sandbox, path, content)
+    end)
   end
 
   @doc """
@@ -140,6 +222,52 @@ defmodule Terrarium do
   """
   @spec ls(Sandbox.t(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def ls(%Sandbox{provider: provider} = sandbox, path) do
-    provider.ls(sandbox, path)
+    Terrarium.Telemetry.span(:ls, %{sandbox: sandbox, path: path}, fn ->
+      provider.ls(sandbox, path)
+    end)
+  end
+
+  defp get_config(nil, key, default), do: Application.get_env(:terrarium, key, default)
+  defp get_config(config, key, default), do: Keyword.get(config, key, default)
+
+  # Resolves an atom that could be either a named provider from config
+  # or a direct provider module.
+  defp resolve_named_or_module(name, config) do
+    providers = get_config(config, :providers, [])
+
+    case Keyword.fetch(providers, name) do
+      {:ok, {module, opts}} -> {module, opts}
+      {:ok, module} when is_atom(module) -> {module, []}
+      :error -> {name, []}
+    end
+  end
+
+  # Resolves the provider from opts (inline :provider key) or falls back
+  # to the configured default.
+  defp resolve_from_opts(opts, config) do
+    case Keyword.pop(opts, :provider) do
+      {nil, opts} ->
+        {provider, provider_opts} = resolve_default!(config)
+        {provider, provider_opts, opts}
+
+      {{module, provider_opts}, opts} when is_atom(module) ->
+        {module, provider_opts, opts}
+
+      {module, opts} when is_atom(module) ->
+        {provider, provider_opts} = resolve_named_or_module(module, config)
+        {provider, provider_opts, opts}
+    end
+  end
+
+  defp resolve_default!(config) do
+    case get_config(config, :default, nil) do
+      nil ->
+        raise ArgumentError,
+              "no default provider configured. Either pass a provider explicitly " <>
+                "or configure one: config :terrarium, default: :local, providers: [local: Terrarium.Providers.Local]"
+
+      name ->
+        resolve_named_or_module(name, config)
+    end
   end
 end
