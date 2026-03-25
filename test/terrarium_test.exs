@@ -3,18 +3,27 @@ defmodule TerrariumTest do
 
   alias Terrarium.Sandbox
 
-  describe "create/2" do
+  describe "create/2 with explicit module" do
     test "delegates to the provider's create callback" do
       assert {:ok, %Sandbox{id: "test-123", provider: Terrarium.TestProvider}} =
                Terrarium.create(Terrarium.TestProvider)
     end
+  end
 
-    test "uses the provider from opts when no module is passed" do
+  describe "create/1 with inline :provider option" do
+    test "accepts a provider module in opts" do
       assert {:ok, %Sandbox{provider: Terrarium.TestProvider}} =
                Terrarium.create(provider: Terrarium.TestProvider)
     end
 
-    test "raises when no provider is configured and none is passed" do
+    test "accepts a {module, opts} tuple in opts" do
+      assert {:ok, %Sandbox{provider: Terrarium.TestProvider}} =
+               Terrarium.create(provider: {Terrarium.TestProvider, some: "config"})
+    end
+  end
+
+  describe "create/1 with no provider" do
+    test "raises when no default is configured" do
       assert_raise ArgumentError, ~r/no default provider configured/, fn ->
         Terrarium.create()
       end
@@ -38,7 +47,9 @@ defmodule TerrariumTest do
   describe "exec/3" do
     test "delegates to the provider's exec callback" do
       sandbox = %Sandbox{id: "test-123", provider: Terrarium.TestProvider}
-      assert {:ok, %Terrarium.Process.Result{exit_code: 0, stdout: "hello\n"}} = Terrarium.exec(sandbox, "echo hello")
+
+      assert {:ok, %Terrarium.Process.Result{exit_code: 0, stdout: "hello\n"}} =
+               Terrarium.exec(sandbox, "echo hello")
     end
   end
 
