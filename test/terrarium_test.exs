@@ -74,6 +74,15 @@ defmodule TerrariumTest do
     end
   end
 
+  describe "ssh_opts/1" do
+    test "delegates to the provider's ssh_opts callback" do
+      sandbox = %Sandbox{id: "test-123", provider: Terrarium.TestProvider}
+
+      assert {:ok, [host: "test.example.com", port: 22, user: "root", auth: nil]} =
+               Terrarium.ssh_opts(sandbox)
+    end
+  end
+
   describe "reconnect/1" do
     test "delegates to the provider's reconnect callback" do
       sandbox = %Sandbox{id: "test-123", provider: Terrarium.TestProvider}

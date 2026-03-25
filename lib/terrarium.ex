@@ -214,6 +214,25 @@ defmodule Terrarium do
   end
 
   @doc """
+  Returns SSH connection parameters for the sandbox.
+
+  This allows consumers to establish direct SSH connections to the sandbox,
+  for example to set up Erlang distribution using `:peer` or to tunnel
+  other protocols over SSH.
+
+  ## Examples
+
+      {:ok, opts} = Terrarium.ssh_opts(sandbox)
+      # opts = [host: "sandbox.example.com", port: 22, user: "root", auth: nil]
+  """
+  @spec ssh_opts(Sandbox.t()) :: {:ok, Terrarium.Provider.ssh_opts()} | {:error, term()}
+  def ssh_opts(%Sandbox{provider: provider} = sandbox) do
+    Terrarium.Telemetry.span(:ssh_opts, %{sandbox: sandbox}, fn ->
+      provider.ssh_opts(sandbox)
+    end)
+  end
+
+  @doc """
   Lists the contents of a directory in the sandbox.
 
   ## Examples

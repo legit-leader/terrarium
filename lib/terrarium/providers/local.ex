@@ -45,6 +45,11 @@ defmodule Terrarium.Providers.Local do
   def reconnect(sandbox), do: {:ok, sandbox}
 
   @impl true
+  def ssh_opts(_sandbox) do
+    {:ok, [host: "localhost", port: 22, user: current_user(), auth: nil]}
+  end
+
+  @impl true
   def exec(sandbox, command, opts \\ [])
 
   def exec(%Terrarium.Sandbox{state: %{"cwd" => cwd}}, command, opts) do
@@ -99,5 +104,9 @@ defmodule Terrarium.Providers.Local do
 
   defp generate_id do
     :crypto.strong_rand_bytes(8) |> Base.url_encode64(padding: false)
+  end
+
+  defp current_user do
+    System.get_env("USER") || System.get_env("USERNAME") || "root"
   end
 end

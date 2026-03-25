@@ -41,6 +41,10 @@ defmodule Terrarium.Telemetry do
 
   - Metadata: `%{sandbox: Terrarium.Sandbox.t(), path: String.t()}`
 
+  ### `[:terrarium, :ssh_opts, :start | :stop | :exception]`
+
+  - Metadata: `%{sandbox: Terrarium.Sandbox.t()}`
+
   ### `[:terrarium, :reconnect, :start | :stop | :exception]`
 
   - Metadata: `%{sandbox: Terrarium.Sandbox.t()}`

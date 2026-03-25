@@ -62,6 +62,7 @@ defmodule Terrarium.Providers.SSH do
     port = Keyword.get(opts, :port, @default_port)
     connect_timeout = Keyword.get(opts, :connect_timeout, @default_connect_timeout)
     cwd = Keyword.get(opts, :cwd, "/")
+    auth = Keyword.get(opts, :auth)
 
     ssh_opts =
       [
@@ -69,7 +70,7 @@ defmodule Terrarium.Providers.SSH do
         silently_accept_hosts: true,
         user_interaction: false
       ]
-      |> add_auth_opts(Keyword.get(opts, :auth))
+      |> add_auth_opts(auth)
 
     case :ssh.connect(to_charlist(host), port, ssh_opts, connect_timeout) do
       {:ok, conn} ->
@@ -81,6 +82,7 @@ defmodule Terrarium.Providers.SSH do
             "user" => user,
             "port" => port,
             "cwd" => cwd,
+            "auth" => serialize_auth(auth),
             "conn" => conn
           }
         }
@@ -111,13 +113,32 @@ defmodule Terrarium.Providers.SSH do
       {:ok, sandbox}
     else
       # Re-establish connection using stored info
-      create(
+      opts = [
         host: state["host"],
         user: state["user"],
         port: state["port"],
         cwd: state["cwd"]
-      )
+      ]
+
+      opts =
+        case deserialize_auth(state["auth"]) do
+          nil -> opts
+          auth -> Keyword.put(opts, :auth, auth)
+        end
+
+      create(opts)
     end
+  end
+
+  @impl true
+  def ssh_opts(%Terrarium.Sandbox{state: state}) do
+    {:ok,
+     [
+       host: state["host"],
+       port: state["port"],
+       user: state["user"],
+       auth: deserialize_auth(state["auth"])
+     ]}
   end
 
   @impl true
@@ -234,6 +255,18 @@ defmodule Terrarium.Providers.SSH do
   end
 
   defp escape(str), do: "'#{String.replace(str, "'", "'\\''")}'"
+
+  defp serialize_auth(nil), do: nil
+  defp serialize_auth({:password, password}), do: %{"type" => "password", "value" => password}
+  defp serialize_auth({:key, pem}), do: %{"type" => "key", "value" => pem}
+  defp serialize_auth({:key_path, path}), do: %{"type" => "key_path", "value" => path}
+  defp serialize_auth({:user_dir, dir}), do: %{"type" => "user_dir", "value" => dir}
+
+  defp deserialize_auth(nil), do: nil
+  defp deserialize_auth(%{"type" => "password", "value" => v}), do: {:password, v}
+  defp deserialize_auth(%{"type" => "key", "value" => v}), do: {:key, v}
+  defp deserialize_auth(%{"type" => "key_path", "value" => v}), do: {:key_path, v}
+  defp deserialize_auth(%{"type" => "user_dir", "value" => v}), do: {:user_dir, v}
 
   defp add_auth_opts(ssh_opts, nil), do: ssh_opts
 
