@@ -237,8 +237,7 @@ defmodule Terrarium.Providers.SSH do
 
   defp add_auth_opts(ssh_opts, nil), do: ssh_opts
 
-  defp add_auth_opts(ssh_opts, {:password, password}),
-    do: Keyword.put(ssh_opts, :password, to_charlist(password))
+  defp add_auth_opts(ssh_opts, {:password, password}), do: Keyword.put(ssh_opts, :password, to_charlist(password))
 
   defp add_auth_opts(ssh_opts, {:key, pem}),
     do: Keyword.put(ssh_opts, :key_cb, {Terrarium.Providers.SSH.KeyCb, key: pem})
@@ -246,6 +245,5 @@ defmodule Terrarium.Providers.SSH do
   defp add_auth_opts(ssh_opts, {:key_path, path}),
     do: Keyword.put(ssh_opts, :key_cb, {Terrarium.Providers.SSH.KeyCb, key_path: path})
 
-  defp add_auth_opts(ssh_opts, {:user_dir, dir}),
-    do: Keyword.put(ssh_opts, :user_dir, to_charlist(Path.expand(dir)))
+  defp add_auth_opts(ssh_opts, {:user_dir, dir}), do: Keyword.put(ssh_opts, :user_dir, to_charlist(Path.expand(dir)))
 end
