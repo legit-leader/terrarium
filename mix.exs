@@ -55,6 +55,8 @@ defmodule Terrarium.MixProject do
       groups_for_modules: [
         Core: [
           Terrarium,
+          Terrarium.Runtime,
+          Terrarium.Peer,
           Terrarium.Sandbox,
           Terrarium.Telemetry
         ],
