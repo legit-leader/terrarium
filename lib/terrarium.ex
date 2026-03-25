@@ -81,13 +81,19 @@ defmodule Terrarium do
   def create(name, opts) when is_atom(name) and name != nil do
     {config, opts} = Keyword.pop(opts, :config)
     {provider, provider_opts} = resolve_named_or_module(name, config)
-    provider.create(Keyword.merge(provider_opts, opts))
+
+    Terrarium.Telemetry.span(:create, %{provider: provider}, fn ->
+      provider.create(Keyword.merge(provider_opts, opts))
+    end)
   end
 
   def create(opts, []) when is_list(opts) do
     {config, opts} = Keyword.pop(opts, :config)
     {provider, provider_opts, opts} = resolve_from_opts(opts, config)
-    provider.create(Keyword.merge(provider_opts, opts))
+
+    Terrarium.Telemetry.span(:create, %{provider: provider}, fn ->
+      provider.create(Keyword.merge(provider_opts, opts))
+    end)
   end
 
   @doc """
@@ -124,7 +130,9 @@ defmodule Terrarium do
   """
   @spec reconnect(Sandbox.t()) :: {:ok, Sandbox.t()} | {:error, term()}
   def reconnect(%Sandbox{provider: provider} = sandbox) do
-    provider.reconnect(sandbox)
+    Terrarium.Telemetry.span(:reconnect, %{sandbox: sandbox}, fn ->
+      provider.reconnect(sandbox)
+    end)
   end
 
   @doc """
@@ -136,7 +144,9 @@ defmodule Terrarium do
   """
   @spec destroy(Sandbox.t()) :: :ok | {:error, term()}
   def destroy(%Sandbox{provider: provider} = sandbox) do
-    provider.destroy(sandbox)
+    Terrarium.Telemetry.span(:destroy, %{sandbox: sandbox}, fn ->
+      provider.destroy(sandbox)
+    end)
   end
 
   @doc """
@@ -149,7 +159,9 @@ defmodule Terrarium do
   """
   @spec status(Sandbox.t()) :: Terrarium.Provider.status()
   def status(%Sandbox{provider: provider} = sandbox) do
-    provider.status(sandbox)
+    Terrarium.Telemetry.span(:status, %{sandbox: sandbox}, fn ->
+      provider.status(sandbox)
+    end)
   end
 
   @doc """
@@ -168,7 +180,9 @@ defmodule Terrarium do
   """
   @spec exec(Sandbox.t(), String.t(), keyword()) :: {:ok, Terrarium.Process.Result.t()} | {:error, term()}
   def exec(%Sandbox{provider: provider} = sandbox, command, opts \\ []) do
-    provider.exec(sandbox, command, opts)
+    Terrarium.Telemetry.span(:exec, %{sandbox: sandbox, command: command}, fn ->
+      provider.exec(sandbox, command, opts)
+    end)
   end
 
   @doc """
@@ -180,7 +194,9 @@ defmodule Terrarium do
   """
   @spec read_file(Sandbox.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%Sandbox{provider: provider} = sandbox, path) do
-    provider.read_file(sandbox, path)
+    Terrarium.Telemetry.span(:read_file, %{sandbox: sandbox, path: path}, fn ->
+      provider.read_file(sandbox, path)
+    end)
   end
 
   @doc """
@@ -192,7 +208,9 @@ defmodule Terrarium do
   """
   @spec write_file(Sandbox.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%Sandbox{provider: provider} = sandbox, path, content) do
-    provider.write_file(sandbox, path, content)
+    Terrarium.Telemetry.span(:write_file, %{sandbox: sandbox, path: path}, fn ->
+      provider.write_file(sandbox, path, content)
+    end)
   end
 
   @doc """
@@ -204,7 +222,9 @@ defmodule Terrarium do
   """
   @spec ls(Sandbox.t(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def ls(%Sandbox{provider: provider} = sandbox, path) do
-    provider.ls(sandbox, path)
+    Terrarium.Telemetry.span(:ls, %{sandbox: sandbox, path: path}, fn ->
+      provider.ls(sandbox, path)
+    end)
   end
 
   defp get_config(nil, key, default), do: Application.get_env(:terrarium, key, default)

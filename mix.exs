@@ -35,6 +35,9 @@ defmodule Terrarium.MixProject do
       # Command execution with child process shutdown propagation
       {:muontrap, "~> 1.7"},
 
+      # Telemetry
+      {:telemetry, "~> 1.0"},
+
       # Development & Testing
       {:quokka, "~> 2.12", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.35", only: :dev, runtime: false},
@@ -52,7 +55,8 @@ defmodule Terrarium.MixProject do
       groups_for_modules: [
         Core: [
           Terrarium,
-          Terrarium.Sandbox
+          Terrarium.Sandbox,
+          Terrarium.Telemetry
         ],
         Behaviours: [
           Terrarium.Provider
