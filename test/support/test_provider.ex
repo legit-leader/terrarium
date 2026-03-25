@@ -15,6 +15,9 @@ defmodule Terrarium.TestProvider do
   def status(_sandbox), do: :running
 
   @impl true
+  def reconnect(sandbox), do: {:ok, sandbox}
+
+  @impl true
   def exec(_sandbox, _command, _opts \\ []) do
     {:ok, %Terrarium.Process.Result{exit_code: 0, stdout: "hello\n"}}
   end
