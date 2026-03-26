@@ -19,6 +19,7 @@ The AI agent ecosystem is producing many sandbox environment providers - Daytona
 - **Local provider** - built-in provider for dev/test that runs everything on the local machine
 - **Serialization** - persist and restore sandbox references across client restarts
 - **Provider-agnostic** - swap providers without changing application code
+- **Replication** - replicate the current BEAM application (OTP version + code) into a sandbox and get a connected peer node
 
 ## Installation
 
@@ -27,7 +28,7 @@ Add `terrarium` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:terrarium, "~> 0.1.0"}
+    {:terrarium, "~> 0.2.0"}
   ]
 end
 ```
@@ -79,7 +80,7 @@ config :terrarium,
 ```elixir
 def deps do
   [
-    {:terrarium, "~> 0.1.0"},
+    {:terrarium, "~> 0.2.0"},
     {:terrarium_daytona, "~> 0.1.0"}
   ]
 end
@@ -186,6 +187,24 @@ end
 | [Fly Sprites](https://sprites.dev) | `terrarium_sprites` | Planned |
 | [Namespace](https://namespace.so) | `terrarium_namespace` | Planned |
 
+## Replication
+
+Replicate the current BEAM application into a sandbox with a single call. `Terrarium.replicate/2` detects the local OTP version, installs a matching Erlang in the sandbox, deploys the running node's code, and starts a connected peer:
+
+```elixir
+{:ok, sandbox} = Terrarium.create(image: "debian:12")
+{:ok, pid, node} = Terrarium.replicate(sandbox)
+
+# Call your own modules on the remote node
+:erpc.call(node, MyModule, :my_function, [args])
+
+# Clean up
+Terrarium.stop_replica(pid)
+Terrarium.destroy(sandbox)
+```
+
+Options: `:name`, `:env`, `:erl_args`, `:dest` (remote deploy path), `:timeout` (Erlang install timeout).
+
 ## Telemetry
 
 Terrarium emits telemetry events for all operations via `:telemetry.span/3`. Each operation emits `:start`, `:stop`, and `:exception` events automatically.
@@ -200,6 +219,8 @@ Terrarium emits telemetry events for all operations via `:telemetry.span/3`. Eac
 | `[:terrarium, :ls, *]` | `%{sandbox: sandbox, path: string}` |
 | `[:terrarium, :reconnect, *]` | `%{sandbox: sandbox}` |
 | `[:terrarium, :status, *]` | `%{sandbox: sandbox}` |
+| `[:terrarium, :ssh_opts, *]` | `%{sandbox: sandbox}` |
+| `[:terrarium, :replicate, *]` | `%{sandbox: sandbox, otp_version: string}` |
 
 ```elixir
 :telemetry.attach_many(
