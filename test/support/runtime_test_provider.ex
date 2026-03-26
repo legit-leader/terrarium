@@ -24,6 +24,9 @@ defmodule Terrarium.RuntimeTestProvider do
   def status(_sandbox), do: :running
 
   @impl true
+  def reconnect(sandbox), do: {:ok, sandbox}
+
+  @impl true
   def exec(sandbox, command, _opts \\ []) do
     responses = sandbox.state["exec_responses"]
 

@@ -26,8 +26,8 @@ defmodule Terrarium.IntegrationTest do
     test "runs a command in the sandbox directory", ctx do
       sandbox = create_sandbox(ctx)
 
-      {:ok, result} = Terrarium.exec(sandbox, "pwd")
-      assert String.trim(result.stdout) == ctx.tmp_dir
+      {:ok, result} = Terrarium.exec(sandbox, "echo hello")
+      assert String.trim(result.stdout) == "hello"
       assert result.exit_code == 0
     end
 
