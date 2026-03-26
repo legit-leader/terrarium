@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.4.0] - 2026-03-26
+
+### Changes
+
+- refactor: Expose replicate/2 and stop_replica/1 on top-level Terrarium module
+
+- refactor: Remove telemetry spans from internal Peer module
+
+
+### Features
+
+- feat: Add Terrarium.Runtime and Terrarium.Peer for running BEAM nodes in sandboxes
+
 ## [0.3.0] - 2026-03-26
 
 ### Bug Fixes
