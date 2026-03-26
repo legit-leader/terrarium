@@ -19,6 +19,8 @@ The AI agent ecosystem is producing many sandbox environment providers - Daytona
 - **Local provider** - built-in provider for dev/test that runs everything on the local machine
 - **Serialization** - persist and restore sandbox references across client restarts
 - **Provider-agnostic** - swap providers without changing application code
+- **BEAM peer nodes** - start connected Erlang peer nodes inside sandboxes over SSH
+- **Runtime replication** - replicate the current BEAM application (OTP version + code) into a sandbox
 
 ## Installation
 
@@ -27,7 +29,7 @@ Add `terrarium` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:terrarium, "~> 0.1.0"}
+    {:terrarium, "~> 0.2.0"}
   ]
 end
 ```
@@ -79,7 +81,7 @@ config :terrarium,
 ```elixir
 def deps do
   [
-    {:terrarium, "~> 0.1.0"},
+    {:terrarium, "~> 0.2.0"},
     {:terrarium_daytona, "~> 0.1.0"}
   ]
 end
@@ -186,6 +188,45 @@ end
 | [Fly Sprites](https://sprites.dev) | `terrarium_sprites` | Planned |
 | [Namespace](https://namespace.so) | `terrarium_namespace` | Planned |
 
+## BEAM Peer Nodes
+
+Start a connected Erlang peer node inside a sandbox over SSH using OTP's `:peer` module:
+
+```elixir
+{:ok, sandbox} = Terrarium.create(image: "debian:12")
+
+{:ok, pid, node} = Terrarium.Peer.start(sandbox,
+  pa_paths: ["/opt/terrarium/release/lib/*/ebin"],
+  env: %{"MIX_ENV" => "prod"}
+)
+
+# The node is connected — call into it directly
+:rpc.call(node, System, :version, [])
+
+# When done
+Terrarium.Peer.stop(pid)
+```
+
+Options: `:name`, `:pa_paths`, `:env`, `:erl_args`. All SSH auth types supported by your provider are handled automatically.
+
+## Runtime Replication
+
+Replicate the current BEAM application into a sandbox with a single call. `Terrarium.Runtime` detects the local OTP version, installs a matching Erlang in the sandbox, deploys the running node's code, and starts a connected peer:
+
+```elixir
+{:ok, sandbox} = Terrarium.create(image: "debian:12")
+{:ok, pid, node} = Terrarium.Runtime.run(sandbox)
+
+# Call your own modules on the remote node
+:erpc.call(node, MyModule, :my_function, [args])
+
+# Clean up
+Terrarium.Runtime.stop(pid)
+Terrarium.destroy(sandbox)
+```
+
+Options: `:name`, `:env`, `:erl_args`, `:dest` (remote deploy path), `:timeout` (Erlang install timeout).
+
 ## Telemetry
 
 Terrarium emits telemetry events for all operations via `:telemetry.span/3`. Each operation emits `:start`, `:stop`, and `:exception` events automatically.
@@ -200,6 +241,10 @@ Terrarium emits telemetry events for all operations via `:telemetry.span/3`. Eac
 | `[:terrarium, :ls, *]` | `%{sandbox: sandbox, path: string}` |
 | `[:terrarium, :reconnect, *]` | `%{sandbox: sandbox}` |
 | `[:terrarium, :status, *]` | `%{sandbox: sandbox}` |
+| `[:terrarium, :ssh_opts, *]` | `%{sandbox: sandbox}` |
+| `[:terrarium, :peer, :start, *]` | `%{sandbox: sandbox, opts: keyword}` |
+| `[:terrarium, :peer, :stop, *]` | `%{peer_pid: pid}` |
+| `[:terrarium, :runtime, :run, *]` | `%{sandbox: sandbox, otp_version: string}` |
 
 ```elixir
 :telemetry.attach_many(
