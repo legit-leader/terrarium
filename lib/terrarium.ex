@@ -49,6 +49,8 @@ defmodule Terrarium do
 
   alias Terrarium.Sandbox
 
+  require Logger
+
   @doc """
   Creates a new sandbox.
 
@@ -81,6 +83,7 @@ defmodule Terrarium do
   def create(name, opts) when is_atom(name) and name != nil do
     {config, opts} = Keyword.pop(opts, :config)
     {provider, provider_opts} = resolve_named_or_module(name, config)
+    Logger.debug("Creating sandbox with provider #{inspect(provider)}")
 
     Terrarium.Telemetry.span(:create, %{provider: provider}, fn ->
       provider.create(Keyword.merge(provider_opts, opts))
@@ -90,6 +93,7 @@ defmodule Terrarium do
   def create(opts, []) when is_list(opts) do
     {config, opts} = Keyword.pop(opts, :config)
     {provider, provider_opts, opts} = resolve_from_opts(opts, config)
+    Logger.debug("Creating sandbox with provider #{inspect(provider)}")
 
     Terrarium.Telemetry.span(:create, %{provider: provider}, fn ->
       provider.create(Keyword.merge(provider_opts, opts))
@@ -130,6 +134,8 @@ defmodule Terrarium do
   """
   @spec reconnect(Sandbox.t()) :: {:ok, Sandbox.t()} | {:error, term()}
   def reconnect(%Sandbox{provider: provider} = sandbox) do
+    Logger.debug("Reconnecting to sandbox #{sandbox.id}")
+
     Terrarium.Telemetry.span(:reconnect, %{sandbox: sandbox}, fn ->
       provider.reconnect(sandbox)
     end)
@@ -144,6 +150,8 @@ defmodule Terrarium do
   """
   @spec destroy(Sandbox.t()) :: :ok | {:error, term()}
   def destroy(%Sandbox{provider: provider} = sandbox) do
+    Logger.debug("Destroying sandbox #{sandbox.id}")
+
     Terrarium.Telemetry.span(:destroy, %{sandbox: sandbox}, fn ->
       provider.destroy(sandbox)
     end)
@@ -159,6 +167,8 @@ defmodule Terrarium do
   """
   @spec status(Sandbox.t()) :: Terrarium.Provider.status()
   def status(%Sandbox{provider: provider} = sandbox) do
+    Logger.debug("Checking status of sandbox #{sandbox.id}")
+
     Terrarium.Telemetry.span(:status, %{sandbox: sandbox}, fn ->
       provider.status(sandbox)
     end)
@@ -180,6 +190,8 @@ defmodule Terrarium do
   """
   @spec exec(Sandbox.t(), String.t(), keyword()) :: {:ok, Terrarium.Process.Result.t()} | {:error, term()}
   def exec(%Sandbox{provider: provider} = sandbox, command, opts \\ []) do
+    Logger.debug("Executing command on sandbox #{sandbox.id}: #{command}")
+
     Terrarium.Telemetry.span(:exec, %{sandbox: sandbox, command: command}, fn ->
       provider.exec(sandbox, command, opts)
     end)
@@ -194,6 +206,8 @@ defmodule Terrarium do
   """
   @spec read_file(Sandbox.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%Sandbox{provider: provider} = sandbox, path) do
+    Logger.debug("Reading file #{path} from sandbox #{sandbox.id}")
+
     Terrarium.Telemetry.span(:read_file, %{sandbox: sandbox, path: path}, fn ->
       provider.read_file(sandbox, path)
     end)
@@ -208,8 +222,45 @@ defmodule Terrarium do
   """
   @spec write_file(Sandbox.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%Sandbox{provider: provider} = sandbox, path, content) do
+    Logger.debug("Writing file #{path} to sandbox #{sandbox.id} (#{byte_size(content)} bytes)")
+
     Terrarium.Telemetry.span(:write_file, %{sandbox: sandbox, path: path}, fn ->
       provider.write_file(sandbox, path, content)
+    end)
+  end
+
+  @doc """
+  Transfers a local file to the sandbox filesystem.
+
+  Uses the provider's optimized transfer mechanism when available (e.g., SFTP
+  for SSH providers). Falls back to reading the local file and calling
+  `write_file/3` if the provider does not implement a custom `transfer/4`.
+
+  ## Options
+
+  - `:timeout` — transfer timeout in milliseconds
+
+  ## Examples
+
+      :ok = Terrarium.transfer(sandbox, "/tmp/release.tar.gz", "/app/release.tar.gz")
+  """
+  @spec transfer(Sandbox.t(), String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def transfer(%Sandbox{provider: provider} = sandbox, local_path, remote_path, opts \\ []) do
+    metadata = %{sandbox: sandbox, local_path: local_path, remote_path: remote_path}
+
+    metadata =
+      case File.stat(local_path) do
+        {:ok, %{size: size}} -> Map.put(metadata, :file_size, size)
+        _ -> metadata
+      end
+
+    Logger.debug(
+      "Transferring #{local_path} to #{remote_path} on sandbox #{sandbox.id}" <>
+        if(metadata[:file_size], do: " (#{metadata[:file_size]} bytes)", else: "")
+    )
+
+    Terrarium.Telemetry.span(:transfer, metadata, fn ->
+      provider.transfer(sandbox, local_path, remote_path, opts)
     end)
   end
 
@@ -227,6 +278,8 @@ defmodule Terrarium do
   """
   @spec ssh_opts(Sandbox.t()) :: {:ok, Terrarium.Provider.ssh_opts()} | {:error, term()}
   def ssh_opts(%Sandbox{provider: provider} = sandbox) do
+    Logger.debug("Fetching SSH opts for sandbox #{sandbox.id}")
+
     Terrarium.Telemetry.span(:ssh_opts, %{sandbox: sandbox}, fn ->
       provider.ssh_opts(sandbox)
     end)
@@ -241,6 +294,8 @@ defmodule Terrarium do
   """
   @spec ls(Sandbox.t(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def ls(%Sandbox{provider: provider} = sandbox, path) do
+    Logger.debug("Listing directory #{path} on sandbox #{sandbox.id}")
+
     Terrarium.Telemetry.span(:ls, %{sandbox: sandbox, path: path}, fn ->
       provider.ls(sandbox, path)
     end)
