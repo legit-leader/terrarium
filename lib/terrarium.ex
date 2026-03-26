@@ -47,9 +47,9 @@ defmodule Terrarium do
       :ok = Terrarium.destroy(sandbox)
   """
 
-  require Logger
-
   alias Terrarium.Sandbox
+
+  require Logger
 
   @doc """
   Creates a new sandbox.
