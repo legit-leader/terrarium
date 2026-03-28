@@ -184,11 +184,15 @@ defmodule Terrarium.Runtime do
   # ============================================================================
 
   defp start_peer(sandbox, otp_version, dest, opts) do
+    # Derive the remote home dir from the resolved dest path
+    # (dest is already absolute, e.g. /home/exedev/.terrarium/release)
+    remote_home = dest |> Path.split() |> Enum.take(3) |> Path.join()
+
     peer_opts =
       opts
       |> Keyword.take([:name, :env, :erl_args])
       |> Keyword.put(:pa_paths, ["#{dest}/*/ebin"])
-      |> Keyword.put(:erl_cmd, "$HOME/.local/bin/mise x erlang@#{otp_version} -- erl")
+      |> Keyword.put(:erl_cmd, "#{remote_home}/.local/bin/mise x erlang@#{otp_version} -- erl")
 
     Terrarium.Peer.start(sandbox, peer_opts)
   end
