@@ -106,10 +106,10 @@ defmodule Terrarium.Peer do
             cleanup_temp_files(temp_files)
             {:error, reason}
         end
-      rescue
-        e ->
+      catch
+        kind, reason ->
           cleanup_temp_files(temp_files)
-          {:error, {:peer_start_failed, Exception.message(e)}}
+          {:error, {:peer_start_failed, {kind, reason}}}
       end
     end
   end
@@ -120,7 +120,7 @@ defmodule Terrarium.Peer do
     user = ssh_config[:user]
     auth = ssh_config[:auth]
 
-    {auth_flags, temp_files} = build_auth_flags(auth)
+    {auth_flags, auth_temp_files} = build_auth_flags(auth)
     erl_command = build_erl_command(pa_paths, env, erl_args, erl_cmd)
 
     ssh_parts =
@@ -129,11 +129,24 @@ defmodule Terrarium.Peer do
         "-o StrictHostKeyChecking=no",
         "-o UserKnownHostsFile=/dev/null",
         "-p #{port}"
-      ] ++ auth_flags ++ ["#{user}@#{host}", "'#{erl_command}'"]
+      ] ++ auth_flags ++ ["#{user}@#{host}"]
 
-    exec_cmd = ssh_parts |> Enum.join(" ") |> to_charlist()
+    ssh_cmd = Enum.join(ssh_parts, " ")
 
-    {exec_cmd, temp_files}
+    # Create a wrapper script that :peer can use as the "erl" executable.
+    # :peer calls it with args like: -sname <name> -user peer
+    # The script forwards those args to the remote erl via SSH.
+    script_path = Path.join(System.tmp_dir!(), "terrarium_peer_#{:erlang.unique_integer([:positive])}.sh")
+
+    script = """
+    #!/bin/sh
+    exec #{ssh_cmd} '#{erl_command} "$@"'
+    """
+
+    File.write!(script_path, script)
+    File.chmod!(script_path, 0o755)
+
+    {to_charlist(script_path), [script_path | auth_temp_files]}
   end
 
   defp build_auth_flags(nil), do: {[], []}
