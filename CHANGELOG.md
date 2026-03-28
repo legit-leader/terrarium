@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.8.0] - 2026-03-28
+
+### Features
+
+- feat: Use Terrarium.transfer/4 for code deployment in Runtime
+
 ## [0.7.4] - 2026-03-28
 
 ### Bug Fixes
