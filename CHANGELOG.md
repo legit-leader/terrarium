@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.7.3] - 2026-03-28
+
+### Bug Fixes
+
+- fix: Forward :peer args through SSH in wrapper script
+
 ## [0.7.2] - 2026-03-28
 
 ### Bug Fixes
