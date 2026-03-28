@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.7.4] - 2026-03-28
+
+### Bug Fixes
+
+- fix: Use absolute path for mise in remote erl command
+
 ## [0.7.3] - 2026-03-28
 
 ### Bug Fixes
