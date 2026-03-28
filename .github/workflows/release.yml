@@ -49,12 +49,11 @@ jobs:
 
           current_version=$(elixir scripts/version.exs current)
           latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          release_notes_body="$(cat release-notes.tpl)"
 
           if [ -n "$latest_tag" ]; then
-            git cliff --context --unreleased > release-context.json
+            git cliff --config .github/cliff-release.toml --context --unreleased > release-context.json
           else
-            git cliff --context > release-context.json
+            git cliff --config .github/cliff-release.toml --context > release-context.json
           fi
 
           releaseable_count=$(jq 'if length == 0 then 0 else .[0].commits | length end' release-context.json)
@@ -75,11 +74,11 @@ jobs:
           if [ -n "$latest_tag" ]; then
             next_version=$(elixir scripts/version.exs bump "$latest_tag" "$bump_type")
             git cliff --tag "$next_version" -o CHANGELOG.next.md
-            git cliff --tag "$next_version" --unreleased --strip all --body "$release_notes_body" -o RELEASE_NOTES.md
+            git cliff --config .github/cliff-release.toml --tag "$next_version" --unreleased --strip all -o RELEASE_NOTES.md
           else
             next_version="$current_version"
             git cliff --tag "$next_version" -o CHANGELOG.next.md
-            git cliff --tag "$next_version" --strip all --body "$release_notes_body" -o RELEASE_NOTES.md
+            git cliff --config .github/cliff-release.toml --tag "$next_version" --strip all -o RELEASE_NOTES.md
           fi
 
           echo "should_release=true" >> "$GITHUB_OUTPUT"
