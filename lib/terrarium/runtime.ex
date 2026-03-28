@@ -6,7 +6,6 @@ defmodule Terrarium.Runtime do
   require Logger
 
   @default_dest "/opt/terrarium/release"
-  @default_timeout 300_000
 
   @doc """
   Runs the current BEAM application in the given sandbox.
@@ -31,7 +30,6 @@ defmodule Terrarium.Runtime do
   def run(%Sandbox{} = sandbox, opts \\ []) do
     otp_version = :erlang.system_info(:otp_release) |> List.to_string()
     dest = Keyword.get(opts, :dest, @default_dest)
-    timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     Logger.info("Starting runtime in sandbox",
       sandbox_id: sandbox.id,
@@ -40,9 +38,9 @@ defmodule Terrarium.Runtime do
     )
 
     :telemetry.span([:terrarium, :replicate], %{sandbox: sandbox, otp_version: otp_version}, fn ->
-      with :ok <- ensure_erlang(sandbox, otp_version, timeout),
+      with :ok <- ensure_mise(sandbox),
            :ok <- deploy_code(sandbox, dest),
-           {:ok, pid, node} <- start_peer(sandbox, dest, opts) do
+           {:ok, pid, node} <- start_peer(sandbox, otp_version, dest, opts) do
         Logger.info("Runtime started in sandbox",
           sandbox_id: sandbox.id,
           node: node,
@@ -77,98 +75,33 @@ defmodule Terrarium.Runtime do
   end
 
   # ============================================================================
-  # Erlang Installation
+  # mise
   # ============================================================================
 
-  defp ensure_erlang(sandbox, otp_version, timeout) do
-    case detect_otp_version(sandbox) do
-      {:ok, installed} when installed == otp_version ->
-        Logger.debug("Erlang #{otp_version} already installed", sandbox_id: sandbox.id)
+  defp ensure_mise(sandbox) do
+    case Terrarium.exec(sandbox, "which mise") do
+      {:ok, %{exit_code: 0}} ->
+        Logger.debug("mise already available", sandbox_id: sandbox.id)
         :ok
 
-      {:ok, installed} ->
-        Logger.info("Erlang version mismatch, installing #{otp_version}",
-          sandbox_id: sandbox.id,
-          installed_version: installed,
-          requested_version: otp_version
-        )
+      _ ->
+        Logger.info("Installing mise", sandbox_id: sandbox.id)
 
-        install_erlang(sandbox, otp_version, timeout)
+        case Terrarium.exec(
+               sandbox,
+               ~s(curl -fsSL https://mise.run | sh),
+               timeout: 60_000
+             ) do
+          {:ok, %{exit_code: 0}} ->
+            Logger.info("mise installed", sandbox_id: sandbox.id)
+            :ok
 
-      {:error, :not_installed} ->
-        Logger.info("Erlang not found, installing #{otp_version}", sandbox_id: sandbox.id)
-        install_erlang(sandbox, otp_version, timeout)
+          {:ok, %{exit_code: code, stderr: stderr}} ->
+            {:error, {:mise_install_failed, code, stderr}}
 
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp detect_otp_version(sandbox) do
-    cmd = "erl -eval 'io:format(\"~s\", [erlang:system_info(otp_release)]), halt().' -noshell"
-
-    case Terrarium.exec(sandbox, cmd) do
-      {:ok, %{exit_code: 0, stdout: version}} -> {:ok, String.trim(version)}
-      {:ok, _} -> {:error, :not_installed}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp install_erlang(sandbox, otp_version, timeout) do
-    with {:ok, strategy} <- detect_install_strategy(sandbox) do
-      Logger.info("Installing Erlang #{otp_version} via #{strategy}", sandbox_id: sandbox.id)
-
-      case run_install(sandbox, strategy, otp_version, timeout) do
-        :ok ->
-          Logger.info("Erlang #{otp_version} installed", sandbox_id: sandbox.id, strategy: strategy)
-          :ok
-
-        {:error, reason} = error ->
-          Logger.error("Erlang installation failed",
-            sandbox_id: sandbox.id,
-            strategy: strategy,
-            reason: reason
-          )
-
-          error
-      end
-    end
-  end
-
-  defp detect_install_strategy(sandbox) do
-    cond do
-      command_available?(sandbox, "mise") -> {:ok, :mise}
-      command_available?(sandbox, "apt-get") -> {:ok, :apt}
-      command_available?(sandbox, "apk") -> {:ok, :apk}
-      true -> {:error, :no_supported_installer}
-    end
-  end
-
-  defp command_available?(sandbox, command) do
-    match?({:ok, %{exit_code: 0}}, Terrarium.exec(sandbox, "which #{command}"))
-  end
-
-  defp run_install(sandbox, :mise, version, timeout) do
-    exec_install(sandbox, "mise install erlang@#{version} && mise use --global erlang@#{version}", timeout)
-  end
-
-  defp run_install(sandbox, :apt, version, timeout) do
-    exec_install(
-      sandbox,
-      "apt-get update -qq && apt-get install -y -qq erlang-base=1:#{version}* erlang-dev=1:#{version}*",
-      timeout
-    )
-  end
-
-  defp run_install(sandbox, :apk, version, timeout) do
-    exec_install(sandbox, "apk add --no-cache erlang~#{version}", timeout)
-  end
-
-  defp exec_install(sandbox, command, timeout) do
-    case Terrarium.exec(sandbox, command, timeout: timeout) do
-      {:ok, %{exit_code: 0}} -> :ok
-      {:ok, %{exit_code: code, stderr: stderr}} -> {:error, {:install_failed, code, stderr}}
-      {:error, reason} -> {:error, reason}
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -231,11 +164,12 @@ defmodule Terrarium.Runtime do
   # Peer Node
   # ============================================================================
 
-  defp start_peer(sandbox, dest, opts) do
+  defp start_peer(sandbox, otp_version, dest, opts) do
     peer_opts =
       opts
       |> Keyword.take([:name, :env, :erl_args])
       |> Keyword.put(:pa_paths, ["#{dest}/*/ebin"])
+      |> Keyword.put(:erl_cmd, "$HOME/.local/bin/mise x erlang@#{otp_version} -- erl")
 
     Terrarium.Peer.start(sandbox, peer_opts)
   end
