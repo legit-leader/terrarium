@@ -66,7 +66,11 @@ defmodule Terrarium.Providers.Local do
              cd: work_dir,
              env: env,
              timeout: timeout,
-             stderr_to_stdout: true
+             stderr_to_stdout: true,
+             # Prioritize command latency over throughput for short-lived test commands.
+             # This avoids Linux CI flakes where port work can be delayed long enough
+             # for ExUnit to time out while waiting on a trivial command like `echo`.
+             parallelism: false
            ) do
         {stdout, :timeout} ->
           {:error, {:timeout, stdout}}

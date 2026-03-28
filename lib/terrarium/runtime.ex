@@ -5,7 +5,7 @@ defmodule Terrarium.Runtime do
 
   require Logger
 
-  @default_dest "/opt/terrarium/release"
+  @default_dest ".terrarium/release"
 
   @doc """
   Runs the current BEAM application in the given sandbox.
@@ -39,6 +39,7 @@ defmodule Terrarium.Runtime do
 
     :telemetry.span([:terrarium, :replicate], %{sandbox: sandbox, otp_version: otp_version}, fn ->
       with :ok <- ensure_mise(sandbox),
+           {:ok, dest} <- resolve_dest(sandbox, dest),
            :ok <- deploy_code(sandbox, dest),
            {:ok, pid, node} <- start_peer(sandbox, otp_version, dest, opts) do
         Logger.info("Runtime started in sandbox",
@@ -72,6 +73,25 @@ defmodule Terrarium.Runtime do
   @spec stop(pid()) :: :ok
   def stop(peer_pid) do
     Terrarium.Peer.stop(peer_pid)
+  end
+
+  # ============================================================================
+  # Path Resolution
+  # ============================================================================
+
+  defp resolve_dest(sandbox, dest) do
+    if String.starts_with?(dest, "/") do
+      {:ok, dest}
+    else
+      case Terrarium.exec(sandbox, "echo $HOME") do
+        {:ok, %{exit_code: 0, stdout: home}} ->
+          {:ok, Path.join(String.trim(home), dest)}
+
+        _ ->
+          # Fallback to /tmp if we can't determine home
+          {:ok, Path.join("/tmp", dest)}
+      end
+    end
   end
 
   # ============================================================================
