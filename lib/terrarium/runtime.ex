@@ -136,43 +136,32 @@ defmodule Terrarium.Runtime do
 
     Logger.debug("Creating tarball from #{length(paths)} code paths", sandbox_id: sandbox.id)
 
-    case create_tarball(paths) do
-      {:ok, tarball_data} ->
-        Logger.debug("Tarball created",
-          sandbox_id: sandbox.id,
-          size_bytes: byte_size(tarball_data)
-        )
-
-        upload_and_extract(sandbox, tarball_data, dest)
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp upload_and_extract(sandbox, tarball_data, dest) do
-    remote_tarball = "#{dest}/deploy.tar.gz"
-
-    with {:ok, %{exit_code: 0}} <- Terrarium.exec(sandbox, "mkdir -p #{dest}"),
-         :ok <- Terrarium.write_file(sandbox, remote_tarball, tarball_data),
-         {:ok, %{exit_code: 0}} <- Terrarium.exec(sandbox, "tar xzf #{remote_tarball} -C #{dest}"),
-         {:ok, %{exit_code: 0}} <- Terrarium.exec(sandbox, "rm -f #{remote_tarball}") do
-      Logger.debug("Code deployed to #{dest}", sandbox_id: sandbox.id)
-      :ok
-    else
-      {:ok, %{exit_code: code, stderr: stderr}} -> {:error, {:deploy_failed, code, stderr}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp create_tarball(paths) do
     tarball_path = Path.join(System.tmp_dir!(), "terrarium_deploy_#{System.unique_integer([:positive])}.tar.gz")
     file_args = Enum.flat_map(paths, fn path -> ["-C", Path.dirname(path), Path.basename(path)] end)
 
     try do
       case System.cmd("tar", ["czf", tarball_path | file_args], stderr_to_stdout: true) do
-        {_, 0} -> File.read(tarball_path)
-        {output, _} -> {:error, {:tar_failed, output}}
+        {_, 0} ->
+          Logger.debug("Tarball created",
+            sandbox_id: sandbox.id,
+            size_bytes: File.stat!(tarball_path).size
+          )
+
+          remote_tarball = "#{dest}/deploy.tar.gz"
+
+          with {:ok, %{exit_code: 0}} <- Terrarium.exec(sandbox, "mkdir -p #{dest}"),
+               :ok <- Terrarium.transfer(sandbox, tarball_path, remote_tarball),
+               {:ok, %{exit_code: 0}} <- Terrarium.exec(sandbox, "tar xzf #{remote_tarball} -C #{dest}"),
+               {:ok, %{exit_code: 0}} <- Terrarium.exec(sandbox, "rm -f #{remote_tarball}") do
+            Logger.debug("Code deployed to #{dest}", sandbox_id: sandbox.id)
+            :ok
+          else
+            {:ok, %{exit_code: code, stderr: stderr}} -> {:error, {:deploy_failed, code, stderr}}
+            {:error, reason} -> {:error, reason}
+          end
+
+        {output, _} ->
+          {:error, {:tar_failed, output}}
       end
     after
       File.rm(tarball_path)
