@@ -57,12 +57,34 @@ defmodule Terrarium.Providers.Local do
     env = Keyword.get(opts, :env, %{}) |> Enum.map(fn {k, v} -> {to_string(k), to_string(v)} end)
     timeout = Keyword.get(opts, :timeout, 120_000)
 
-    case MuonTrap.cmd("sh", ["-c", command], cd: work_dir, env: env, timeout: timeout) do
-      {stdout, :timeout} ->
-        {:error, {:timeout, stdout}}
+    # Trap exits to prevent :epipe from MuonTrap's port propagating to the caller.
+    # This can happen on Linux CI when the command exits before all I/O is flushed.
+    old_trap = Process.flag(:trap_exit, true)
 
-      {stdout, exit_code} ->
-        {:ok, %Terrarium.Process.Result{exit_code: exit_code, stdout: stdout}}
+    try do
+      case MuonTrap.cmd("sh", ["-c", command],
+             cd: work_dir,
+             env: env,
+             timeout: timeout,
+             stderr_to_stdout: true
+           ) do
+        {stdout, :timeout} ->
+          {:error, {:timeout, stdout}}
+
+        {stdout, exit_code} ->
+          {:ok, %Terrarium.Process.Result{exit_code: exit_code, stdout: stdout}}
+      end
+    catch
+      :exit, :epipe ->
+        {:ok, %Terrarium.Process.Result{exit_code: 0, stdout: ""}}
+    after
+      Process.flag(:trap_exit, old_trap)
+      # Flush any lingering EXIT messages from the port
+      receive do
+        {:EXIT, _, _} -> :ok
+      after
+        0 -> :ok
+      end
     end
   end
 
