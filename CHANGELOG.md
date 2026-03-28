@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.7.2] - 2026-03-28
+
+### Bug Fixes
+
+- fix: improve github release notes formatting
+
+
+### Changes
+
+- refactor: move release notes template into git-cliff config
+
 ## [0.7.1] - 2026-03-28
 
 ### Bug Fixes
