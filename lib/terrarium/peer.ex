@@ -42,13 +42,6 @@ defmodule Terrarium.Peer do
 
   alias Terrarium.Sandbox
 
-  @ssh_base_args [
-    ~c"-o",
-    ~c"StrictHostKeyChecking=no",
-    ~c"-o",
-    ~c"UserKnownHostsFile=/dev/null"
-  ]
-
   @doc """
   Starts a remote BEAM peer node in the given sandbox.
 
@@ -87,26 +80,6 @@ defmodule Terrarium.Peer do
     :peer.stop(peer_pid)
   end
 
-  @doc """
-  Exec callback invoked by `:peer` to open the SSH port.
-
-  Returns a port connected to the SSH process with properly separated arguments.
-  This function is not intended to be called directly.
-  """
-  @spec peer_exec(map()) :: port()
-  def peer_exec(exec_info) do
-    %{executable: executable, args: args} = exec_info
-    port_opts = [:binary, :stream, :use_stdio, :exit_status, args: args]
-
-    port_opts =
-      case Map.get(exec_info, :env) do
-        nil -> port_opts
-        env -> [{:env, env} | port_opts]
-      end
-
-    Port.open({:spawn_executable, executable}, port_opts)
-  end
-
   defp do_start(sandbox, opts) do
     with {:ok, ssh_config} <- Terrarium.ssh_opts(sandbox) do
       name = Keyword.get(opts, :name, :"terrarium_#{sandbox.id}")
@@ -115,124 +88,88 @@ defmodule Terrarium.Peer do
       erl_args = Keyword.get(opts, :erl_args, "")
       erl_cmd = Keyword.get(opts, :erl_cmd, "erl")
 
-      {:ok, exec_info} = build_exec_info(ssh_config, env, pa_paths, erl_args, erl_cmd)
+      {exec_cmd, temp_files} = build_ssh_exec(ssh_config, env, pa_paths, erl_args, erl_cmd)
 
       peer_opts = %{
         name: name,
         connection: :standard_io,
-        exec: {Terrarium.Peer, :peer_exec, [exec_info]}
+        exec: exec_cmd
       }
 
       try do
         case :peer.start(peer_opts) do
           {:ok, pid, node} ->
-            maybe_monitor_temp_files(exec_info, pid)
+            maybe_monitor_temp_files(temp_files, pid)
             {:ok, pid, node}
 
           {:error, reason} ->
-            cleanup_temp_files(exec_info)
+            cleanup_temp_files(temp_files)
             {:error, reason}
         end
       rescue
         e ->
-          cleanup_temp_files(exec_info)
+          cleanup_temp_files(temp_files)
           {:error, {:peer_start_failed, Exception.message(e)}}
       end
     end
   end
 
-  defp build_exec_info(ssh_config, env, pa_paths, erl_args, erl_cmd) do
+  defp build_ssh_exec(ssh_config, env, pa_paths, erl_args, erl_cmd) do
     host = ssh_config[:host]
     port = ssh_config[:port] || 22
     user = ssh_config[:user]
     auth = ssh_config[:auth]
 
-    {:ok, auth_info} = build_auth(auth)
+    {auth_flags, temp_files} = build_auth_flags(auth)
+    erl_command = build_erl_command(pa_paths, env, erl_args, erl_cmd)
 
-    erl_cmd = build_erl_command(pa_paths, env, erl_args, erl_cmd)
+    ssh_parts =
+      [
+        "ssh",
+        "-o StrictHostKeyChecking=no",
+        "-o UserKnownHostsFile=/dev/null",
+        "-p #{port}"
+      ] ++ auth_flags ++ ["#{user}@#{host}", "'#{erl_command}'"]
 
-    ssh_args =
-      @ssh_base_args ++
-        [~c"-p", to_charlist(Integer.to_string(port))] ++
-        auth_info.args ++
-        [to_charlist("#{user}@#{host}")] ++
-        [to_charlist(erl_cmd)]
+    exec_cmd = ssh_parts |> Enum.join(" ") |> to_charlist()
 
-    executable = auth_info.executable
-    port_env = Map.get(auth_info, :env)
-    temp_files = Map.get(auth_info, :temp_files, [])
-
-    exec_info = %{
-      executable: executable,
-      args: ssh_args,
-      temp_files: temp_files
-    }
-
-    exec_info = if port_env, do: Map.put(exec_info, :env, port_env), else: exec_info
-
-    {:ok, exec_info}
+    {exec_cmd, temp_files}
   end
 
-  defp build_auth(nil) do
-    ssh_path = :os.find_executable(~c"ssh") || raise "ssh not found in PATH"
-    {:ok, %{executable: ssh_path, args: []}}
+  defp build_auth_flags(nil), do: {[], []}
+
+  defp build_auth_flags({:key_path, path}) do
+    {["-i #{Path.expand(path)}"], []}
   end
 
-  defp build_auth({:key_path, path}) do
-    ssh_path = :os.find_executable(~c"ssh") || raise "ssh not found in PATH"
-    {:ok, %{executable: ssh_path, args: [~c"-i", to_charlist(path)]}}
-  end
-
-  defp build_auth({:key, pem}) do
-    ssh_path = :os.find_executable(~c"ssh") || raise "ssh not found in PATH"
+  defp build_auth_flags({:key, pem}) do
     tmp_path = Path.join(System.tmp_dir!(), "terrarium_key_#{:erlang.unique_integer([:positive])}")
     File.write!(tmp_path, pem)
     File.chmod!(tmp_path, 0o600)
-
-    {:ok,
-     %{
-       executable: ssh_path,
-       args: [~c"-i", to_charlist(tmp_path)],
-       temp_files: [tmp_path]
-     }}
+    {["-i #{tmp_path}"], [tmp_path]}
   end
 
-  defp build_auth({:user_dir, dir}) do
-    ssh_path = :os.find_executable(~c"ssh") || raise "ssh not found in PATH"
+  defp build_auth_flags({:user_dir, dir}) do
     expanded = Path.expand(dir)
 
-    {:ok,
-     %{
-       executable: ssh_path,
-       args: [
-         ~c"-o",
-         to_charlist("IdentityFile=#{Path.join(expanded, "id_ed25519")}"),
-         ~c"-o",
-         to_charlist("IdentityFile=#{Path.join(expanded, "id_rsa")}")
-       ]
-     }}
+    {[
+       "-o IdentityFile=#{Path.join(expanded, "id_ed25519")}",
+       "-o IdentityFile=#{Path.join(expanded, "id_rsa")}"
+     ], []}
   end
 
-  defp build_auth({:password, password}) do
-    ssh_path = :os.find_executable(~c"ssh") || raise "ssh not found in PATH"
-
+  defp build_auth_flags({:password, password}) do
     askpass_path =
       Path.join(System.tmp_dir!(), "terrarium_askpass_#{:erlang.unique_integer([:positive])}")
 
     File.write!(askpass_path, "#!/bin/sh\necho '#{escape_shell(password)}'\n")
     File.chmod!(askpass_path, 0o700)
 
-    {:ok,
-     %{
-       executable: ssh_path,
-       args: [],
-       env: [
-         {~c"SSH_ASKPASS", to_charlist(askpass_path)},
-         {~c"SSH_ASKPASS_REQUIRE", ~c"force"},
-         {~c"DISPLAY", ~c":0"}
-       ],
-       temp_files: [askpass_path]
-     }}
+    {[
+       "-o SetEnv=SSH_ASKPASS=#{askpass_path}",
+       "-o SetEnv=SSH_ASKPASS_REQUIRE=force",
+       "-o SetEnv=DISPLAY=:0"
+     ], [askpass_path]}
   end
 
   defp build_erl_command(pa_paths, env, erl_args, erl_cmd) do
@@ -258,7 +195,7 @@ defmodule Terrarium.Peer do
     Enum.join(parts, " ")
   end
 
-  defp maybe_monitor_temp_files(%{temp_files: temp_files}, peer_pid) when is_list(temp_files) and temp_files != [] do
+  defp maybe_monitor_temp_files(temp_files, peer_pid) when is_list(temp_files) and temp_files != [] do
     spawn(fn ->
       ref = Process.monitor(peer_pid)
 
@@ -269,13 +206,13 @@ defmodule Terrarium.Peer do
     end)
   end
 
-  defp maybe_monitor_temp_files(_exec_info, _peer_pid), do: :ok
+  defp maybe_monitor_temp_files(_temp_files, _peer_pid), do: :ok
 
-  defp cleanup_temp_files(%{temp_files: temp_files}) when is_list(temp_files) do
+  defp cleanup_temp_files(temp_files) when is_list(temp_files) do
     Enum.each(temp_files, &File.rm/1)
   end
 
-  defp cleanup_temp_files(_exec_info), do: :ok
+  defp cleanup_temp_files(_), do: :ok
 
   defp escape_shell(value) when is_binary(value) do
     String.replace(value, "'", "'\\''")
