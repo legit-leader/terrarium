@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.7.0] - 2026-03-28
+
+### Features
+
+- feat: Use charlist exec for :peer (OTP 28 compatibility)
+
 ## [0.6.2] - 2026-03-28
 
 ### Bug Fixes
