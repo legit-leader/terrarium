@@ -17,6 +17,8 @@ defmodule Terrarium.Providers.Local do
 
   use Terrarium.Provider
 
+  @exec_retries 1
+
   @impl true
   def create(opts) do
     cwd = Keyword.get_lazy(opts, :cwd, &create_temp_dir/0)
@@ -57,29 +59,80 @@ defmodule Terrarium.Providers.Local do
     env = Keyword.get(opts, :env, %{}) |> Enum.map(fn {k, v} -> {to_string(k), to_string(v)} end)
     timeout = Keyword.get(opts, :timeout, 120_000)
 
-    try do
-      case MuonTrap.cmd("/bin/sh", ["-c", command],
-             cd: work_dir,
-             env: env,
-             timeout: timeout,
-             stderr_to_stdout: true,
-             # Prioritize command latency over throughput for short-lived test commands.
-             # This avoids Linux CI flakes where port work can be delayed long enough
-             # for ExUnit to time out while waiting on a trivial command like `echo`.
-             parallelism: false
-           ) do
-        {stdout, :timeout} ->
-          {:error, {:timeout, stdout}}
+    exec_with_retries(command, work_dir, env, timeout, @exec_retries)
+  end
 
-        {stdout, exit_code} ->
-          {:ok, %Terrarium.Process.Result{exit_code: exit_code, stdout: stdout}}
-      end
-    catch
-      :exit, :epipe ->
-        {:ok, %Terrarium.Process.Result{exit_code: 0, stdout: ""}}
+  defp exec_with_retries(command, work_dir, env, timeout, retries_left) do
+    case exec_once_in_worker(command, work_dir, env, timeout) do
+      {:retry, reason} ->
+        retry_exec(command, work_dir, env, timeout, retries_left, reason)
 
-      :exit, {:epipe, _} ->
-        {:ok, %Terrarium.Process.Result{exit_code: 0, stdout: ""}}
+      result ->
+        result
+    end
+  end
+
+  defp retry_exec(command, work_dir, env, timeout, retries_left, _reason) when retries_left > 0 do
+    Process.sleep(10)
+    exec_with_retries(command, work_dir, env, timeout, retries_left - 1)
+  end
+
+  defp retry_exec(_command, _work_dir, _env, _timeout, 0, reason) do
+    {:error, {:exec_failed, reason}}
+  end
+
+  defp exec_once_in_worker(command, work_dir, env, timeout) do
+    parent = self()
+    ref = make_ref()
+
+    {pid, monitor_ref} =
+      spawn_monitor(fn ->
+        send(parent, {ref, exec_once(command, work_dir, env, timeout)})
+      end)
+
+    receive do
+      {^ref, result} ->
+        Process.demonitor(monitor_ref, [:flush])
+        result
+
+      {:DOWN, ^monitor_ref, :process, ^pid, reason} when reason in [:epipe, {:epipe, nil}] ->
+        {:retry, reason}
+
+      {:DOWN, ^monitor_ref, :process, ^pid, {:epipe, _} = reason} ->
+        {:retry, reason}
+
+      {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
+        {:error, {:exec_failed, reason}}
+    after
+      timeout + 1_000 ->
+        Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, {:timeout, ""}}
+    end
+  end
+
+  defp exec_once(command, work_dir, env, timeout) do
+    case MuonTrap.cmd("/bin/sh", ["-c", command],
+           cd: work_dir,
+           env: env,
+           timeout: timeout,
+           stderr_to_stdout: true,
+           # Prioritize command latency over throughput for short-lived test commands.
+           # This avoids Linux CI flakes where port work can be delayed long enough
+           # for ExUnit to time out while waiting on a trivial command like `echo`.
+           parallelism: false
+         ) do
+      {stdout, :timeout} ->
+        {:error, {:timeout, stdout}}
+
+      {stdout, exit_code} ->
+        {:ok, %Terrarium.Process.Result{exit_code: exit_code, stdout: stdout}}
     end
   end
 
