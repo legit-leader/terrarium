@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.11.0] - 2026-03-29
+
+### Features
+
+- feat: Set ERL_LIBS on remote peer for Application.app_dir support
+
 ## [0.10.0] - 2026-03-29
 
 ### Features
