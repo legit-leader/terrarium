@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## [0.11.1] - 2026-03-29
+
+### Bug Fixes
+
+- fix: Group tar -C by parent directory to include all app dirs (#17)
+
 ## [0.11.0] - 2026-03-29
 
 ### Features
