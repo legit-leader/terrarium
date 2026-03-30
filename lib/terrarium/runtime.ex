@@ -221,7 +221,7 @@ defmodule Terrarium.Runtime do
       end)
 
     try do
-      case System.cmd("tar", ["czf", tarball_path | file_args], stderr_to_stdout: true) do
+      case System.cmd("tar", ["czf", tarball_path, "-h" | file_args], stderr_to_stdout: true) do
         {_, 0} ->
           Logger.debug("Tarball created",
             sandbox_id: sandbox.id,
