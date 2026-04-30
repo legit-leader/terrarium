@@ -181,11 +181,11 @@ end
 |---|---|---|
 | Local | `terrarium` (built-in) | Available |
 | SSH | `terrarium` (built-in) | Available |
+| [Namespace](https://namespace.so) | `terrarium` (built-in) | Initial |
 | [Daytona](https://daytona.io) | `terrarium_daytona` | Planned |
 | [E2B](https://e2b.dev) | `terrarium_e2b` | Planned |
 | [Modal](https://modal.com) | `terrarium_modal` | Planned |
 | [Fly Sprites](https://sprites.dev) | `terrarium_sprites` | Planned |
-| [Namespace](https://namespace.so) | `terrarium_namespace` | Planned |
 
 ## Replication
 

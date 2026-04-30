@@ -35,6 +35,9 @@ defmodule Terrarium.MixProject do
       # Command execution with child process shutdown propagation
       {:muontrap, "~> 1.7"},
 
+      # HTTP client for provider APIs
+      {:req, "~> 0.5"},
+
       # Telemetry
       {:telemetry, "~> 1.0"},
 
@@ -65,6 +68,7 @@ defmodule Terrarium.MixProject do
         ],
         Providers: [
           Terrarium.Providers.Local,
+          Terrarium.Providers.Namespace,
           Terrarium.Providers.SSH
         ]
       ]
