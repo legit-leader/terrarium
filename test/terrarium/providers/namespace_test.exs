@@ -31,6 +31,14 @@ defmodule Terrarium.Providers.NamespaceTest do
       assert [create_request, describe_request] = requests(server)
       assert create_request.authorization == "Bearer tenant-token"
       assert create_request.body["cluster_id"] == "default"
+
+      assert create_request.body["shape"] == %{
+               "machine_arch" => "arm64",
+               "memory_megabytes" => 8_192,
+               "os" => "linux",
+               "virtual_cpu" => 2
+             }
+
       assert create_request.body["experimental"]["authorized_ssh_keys"] == ["ssh-ed25519 test"]
       assert describe_request.body == %{"cluster_id" => "default", "instance_id" => "inst-123"}
     end

@@ -21,7 +21,7 @@ defmodule Terrarium.Providers.Namespace do
 
   - `:token` — Namespace tenant bearer token
   - `:cluster_id` — Namespace cluster id (default: `"default"`)
-  - `:shape` — compute shape map
+  - `:shape` — compute shape map (default: Linux arm64, 2 vCPU, 8 GiB RAM)
   - `:deadline_minutes` — lifetime from creation time (default: `20`)
   - `:ssh_public_key` — public key authorized on the instance
   - `:ssh_private_key` — PEM/private key string used by `ssh_opts/1`
@@ -252,9 +252,9 @@ defmodule Terrarium.Providers.Namespace do
 
   defp shape(opts) do
     Keyword.get(opts, :shape, %{
-      "os" => "macos",
-      "memory_megabytes" => 14_336,
-      "virtual_cpu" => 6,
+      "os" => "linux",
+      "memory_megabytes" => 8_192,
+      "virtual_cpu" => 2,
       "machine_arch" => "arm64"
     })
   end
