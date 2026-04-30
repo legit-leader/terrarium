@@ -1,0 +1,3 @@
+Terrarium Namespace file operations fixture.
+
+This file is used by live mix-run QA to verify transfer, read, write, and ls over SSH.
