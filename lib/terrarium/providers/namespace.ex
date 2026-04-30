@@ -25,7 +25,7 @@ defmodule Terrarium.Providers.Namespace do
   - `:deadline_minutes` — lifetime from creation time (default: `20`)
   - `:ssh_public_key` — public key authorized on the instance
   - `:ssh_private_key` — PEM/private key string used by `ssh_opts/1`
-  - `:ssh_private_key_path` — private key path used by `ssh_opts/1`
+  - `:ssh_private_key_path` — private key path used by `ssh_opts/1`; the containing directory is passed to Erlang SSH
   - `:ssh_user_dir` — SSH user directory used by `ssh_opts/1`
   - `:compute_url` — base ComputeService URL
   - `:request_timeout` — HTTP timeout in milliseconds (default: `30_000`)
@@ -284,9 +284,12 @@ defmodule Terrarium.Providers.Namespace do
   defp normalize_status("DESTROYED"), do: :destroyed
   defp normalize_status(_status), do: :error
 
-  defp ssh_auth(%{"ssh_private_key" => key}) when key not in [nil, ""], do: {:key, key}
-  defp ssh_auth(%{"ssh_private_key_path" => path}) when path not in [nil, ""], do: {:key_path, path}
   defp ssh_auth(%{"ssh_user_dir" => dir}) when dir not in [nil, ""], do: {:user_dir, dir}
+
+  defp ssh_auth(%{"ssh_private_key_path" => path}) when path not in [nil, ""],
+    do: {:user_dir, path |> Path.expand() |> Path.dirname()}
+
+  defp ssh_auth(%{"ssh_private_key" => key}) when key not in [nil, ""], do: {:key, key}
   defp ssh_auth(_state), do: nil
 
   defp parse_endpoint(endpoint) do

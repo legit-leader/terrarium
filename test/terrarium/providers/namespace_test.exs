@@ -108,7 +108,7 @@ defmodule Terrarium.Providers.NamespaceTest do
       assert opts[:host] == "runner.namespace.test"
       assert opts[:port] == 2222
       assert opts[:user] == "admin"
-      assert opts[:auth] == {:key_path, "~/.ssh/id_ed25519"}
+      assert opts[:auth] == {:user_dir, Path.expand("~/.ssh")}
     end
   end
 
