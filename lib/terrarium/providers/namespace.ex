@@ -22,12 +22,18 @@ defmodule Terrarium.Providers.Namespace do
   - `:token` — Namespace tenant bearer token
   - `:cluster_id` — Namespace cluster id (default: `"default"`)
   - `:shape` — compute shape map (default: Linux arm64, 2 vCPU, 8 GiB RAM)
+  - `:image_ref` — optional public or `nscr.io` image reference to start as a container
+  - `:target_container_name` — container name used with `:image_ref` and `exec/3` (default: `"terrarium"`)
+  - `:container_args` — container args passed when starting `:image_ref`
+  - `:container_entrypoint` — container entrypoint passed when starting `:image_ref`
+  - `:container_env` — container environment map passed when starting `:image_ref`
   - `:deadline_minutes` — lifetime from creation time (default: `20`)
   - `:ssh_public_key` — public key authorized on the instance
   - `:ssh_private_key` — PEM/private key string used by `ssh_opts/1`
   - `:ssh_private_key_path` — private key path used by `ssh_opts/1`; the containing directory is passed to Erlang SSH
   - `:ssh_user_dir` — SSH user directory used by `ssh_opts/1`
   - `:compute_url` — base ComputeService URL
+  - `:command_url` — base CommandService URL
   - `:request_timeout` — HTTP timeout in milliseconds (default: `30_000`)
   - `:create_timeout` — polling timeout in milliseconds (default: `120_000`)
   - `:poll_interval` — polling interval in milliseconds (default: `1_000`)
@@ -48,7 +54,8 @@ defmodule Terrarium.Providers.Namespace do
          {:ok, response} <- create_instance(opts, token, ssh_public_key),
          {:ok, instance_id} <- fetch_instance_id(response),
          state = build_state(opts, token, instance_id),
-         :ok <- wait_until_running(state) do
+         :ok <- wait_until_running(state),
+         {:ok, state} <- refresh_command_url(state) do
       {:ok,
        %Terrarium.Sandbox{
          id: instance_id,
@@ -103,7 +110,14 @@ defmodule Terrarium.Providers.Namespace do
   end
 
   @impl true
-  def exec(sandbox, command, opts \\ []) do
+  def exec(sandbox, command, opts \\ [])
+
+  def exec(%Terrarium.Sandbox{state: %{"target_container_name" => target_container_name}} = sandbox, command, opts)
+      when is_binary(target_container_name) do
+    run_command_sync(sandbox.state, command, opts)
+  end
+
+  def exec(sandbox, command, opts) do
     with {:ok, ssh_opts} <- ssh_opts(sandbox),
          {:ok, ssh_sandbox} <- Terrarium.Providers.SSH.create(Keyword.put(ssh_opts, :cwd, Keyword.get(opts, :cwd, "/"))) do
       try do
@@ -141,8 +155,8 @@ defmodule Terrarium.Providers.Namespace do
         }
       }
       |> maybe_put("name", Keyword.get(opts, :name))
-      |> maybe_put("image", Keyword.get(opts, :image))
       |> maybe_put("env", Keyword.get(opts, :env))
+      |> maybe_put("containers", container_requests(opts))
 
     compute_request(state, "CreateInstance", body)
   end
@@ -184,12 +198,65 @@ defmodule Terrarium.Providers.Namespace do
     compute_request(state, "GetSSHConfig", %{"instance_id" => state["instance_id"]})
   end
 
+  defp refresh_command_url(%{"target_container_name" => target_container_name} = state)
+       when is_binary(target_container_name) do
+    case describe_instance(state) do
+      {:ok, %{"extendedMetadata" => %{"commandServiceEndpoint" => endpoint}}} ->
+        {:ok, Map.put(state, "command_url", command_service_url(endpoint))}
+
+      {:ok, %{"extended_metadata" => %{"command_service_endpoint" => endpoint}}} ->
+        {:ok, Map.put(state, "command_url", command_service_url(endpoint))}
+
+      {:ok, _response} ->
+        {:ok, state}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp refresh_command_url(state), do: {:ok, state}
+
+  defp run_command_sync(state, command, opts) do
+    body = %{
+      "instance_id" => state["instance_id"],
+      "target_container_name" => state["target_container_name"],
+      "command" => %{
+        "command" => ["/bin/sh", "-lc", command],
+        "cwd" => Keyword.get(opts, :cwd, "/"),
+        "env_vars" => env_vars(Keyword.get(opts, :env, %{}))
+      }
+    }
+
+    case command_request(state, "RunCommandSync", body, Keyword.get(opts, :timeout)) do
+      {:ok, response} ->
+        {:ok,
+         %Terrarium.Process.Result{
+           exit_code: response["exitCode"] || response["exit_code"] || 0,
+           stdout: command_output(response["stdout"]),
+           stderr: command_output(response["stderr"])
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp compute_request(state, method, body) do
     request(
       state["compute_url"] <> "/" <> method,
       state["token"],
       body,
       state["request_timeout"]
+    )
+  end
+
+  defp command_request(state, method, body, timeout) do
+    request(
+      state["command_url"] <> "/" <> method,
+      state["token"],
+      body,
+      timeout || state["request_timeout"]
     )
   end
 
@@ -243,11 +310,30 @@ defmodule Terrarium.Providers.Namespace do
     %{
       "token" => token,
       "compute_url" => Keyword.get(opts, :compute_url, @default_compute_url),
+      "command_url" =>
+        Keyword.get_lazy(opts, :command_url, fn ->
+          command_url(Keyword.get(opts, :compute_url, @default_compute_url))
+        end),
       "cluster_id" => Keyword.get(opts, :cluster_id, @default_cluster_id),
       "request_timeout" => Keyword.get(opts, :request_timeout, @default_request_timeout),
       "create_timeout" => Keyword.get(opts, :create_timeout, @default_create_timeout),
       "poll_interval" => Keyword.get(opts, :poll_interval, @default_poll_interval)
     }
+    |> maybe_put("target_container_name", target_container_name(opts))
+  end
+
+  defp command_url(compute_url) do
+    String.replace(compute_url, ".ComputeService", ".CommandService")
+  end
+
+  defp command_service_url(endpoint) do
+    endpoint = String.trim_trailing(endpoint, "/")
+
+    if String.ends_with?(endpoint, ".CommandService") do
+      endpoint
+    else
+      endpoint <> "/namespace.cloud.compute.v1beta.CommandService"
+    end
   end
 
   defp shape(opts) do
@@ -264,6 +350,48 @@ defmodule Terrarium.Providers.Namespace do
     |> Keyword.get(:deadline_minutes, 20)
     |> then(&DateTime.add(DateTime.utc_now(), &1, :minute))
     |> DateTime.to_iso8601()
+  end
+
+  defp container_requests(opts) do
+    case Keyword.get(opts, :image_ref) do
+      image_ref when is_binary(image_ref) and image_ref != "" ->
+        [
+          %{
+            "name" => target_container_name(opts),
+            "image_ref" => image_ref,
+            "args" => Keyword.get(opts, :container_args, []),
+            "entrypoint" => Keyword.get(opts, :container_entrypoint, []),
+            "env_vars" => env_vars(Keyword.get(opts, :container_env, %{}))
+          }
+        ]
+
+      _ ->
+        nil
+    end
+  end
+
+  defp target_container_name(opts) do
+    case Keyword.get(opts, :image_ref) do
+      image_ref when is_binary(image_ref) and image_ref != "" -> Keyword.get(opts, :target_container_name, "terrarium")
+      _ -> nil
+    end
+  end
+
+  defp env_vars(env) when is_map(env) do
+    Enum.map(env, fn {name, value} -> %{"name" => to_string(name), "value" => to_string(value)} end)
+  end
+
+  defp env_vars(env) when is_list(env) do
+    Enum.map(env, fn {name, value} -> %{"name" => to_string(name), "value" => to_string(value)} end)
+  end
+
+  defp command_output(nil), do: ""
+
+  defp command_output(output) when is_binary(output) do
+    case Base.decode64(output) do
+      {:ok, decoded} -> decoded
+      :error -> output
+    end
   end
 
   defp fetch_required(opts, key) do

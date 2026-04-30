@@ -50,6 +50,50 @@ defmodule Terrarium.Providers.NamespaceTest do
     test "requires an ssh public key" do
       assert {:error, {:missing_required_option, :ssh_public_key}} = Namespace.create(token: "tenant-token")
     end
+
+    test "starts a target container when image_ref is provided" do
+      {:ok, server} =
+        start_server([
+          {"/namespace.cloud.compute.v1beta.ComputeService/CreateInstance", 200,
+           %{"metadata" => %{"instanceId" => "inst-123"}}},
+          {"/namespace.cloud.compute.v1beta.ComputeService/DescribeInstance", 200,
+           %{"metadata" => %{"status" => "RUNNING"}}},
+          {"/namespace.cloud.compute.v1beta.ComputeService/DescribeInstance", 200,
+           %{
+             "extendedMetadata" => %{"commandServiceEndpoint" => "http://commands.namespace.test"},
+             "metadata" => %{"status" => "RUNNING"}
+           }}
+        ])
+
+      assert {:ok, sandbox} =
+               Namespace.create(
+                 token: "tenant-token",
+                 ssh_public_key: "ssh-ed25519 test",
+                 image_ref: "docker.io/hexpm/elixir:latest",
+                 target_container_name: "elixir",
+                 container_args: ["sleep", "infinity"],
+                 container_env: %{MIX_ENV: "test"},
+                 compute_url: server.url <> "/namespace.cloud.compute.v1beta.ComputeService",
+                 poll_interval: 0
+               )
+
+      assert sandbox.state["target_container_name"] == "elixir"
+
+      assert sandbox.state["command_url"] ==
+               "http://commands.namespace.test/namespace.cloud.compute.v1beta.CommandService"
+
+      assert [create_request, _describe_request, _refresh_request] = requests(server)
+
+      assert create_request.body["containers"] == [
+               %{
+                 "args" => ["sleep", "infinity"],
+                 "entrypoint" => [],
+                 "env_vars" => [%{"name" => "MIX_ENV", "value" => "test"}],
+                 "image_ref" => "docker.io/hexpm/elixir:latest",
+                 "name" => "elixir"
+               }
+             ]
+    end
   end
 
   describe "destroy/1" do
@@ -109,6 +153,39 @@ defmodule Terrarium.Providers.NamespaceTest do
       assert opts[:port] == 2222
       assert opts[:user] == "admin"
       assert opts[:auth] == {:user_dir, Path.expand("~/.ssh")}
+    end
+  end
+
+  describe "exec/3" do
+    test "runs commands through CommandService when a target container is configured" do
+      {:ok, server} =
+        start_server([
+          {"/namespace.cloud.compute.v1beta.CommandService/RunCommandSync", 200,
+           %{"exitCode" => 0, "stdout" => "aGVsbG8K", "stderr" => ""}}
+        ])
+
+      sandbox =
+        server
+        |> sandbox()
+        |> put_in([Access.key!(:state), "target_container_name"], "elixir")
+        |> put_in([Access.key!(:state), "command_url"], server.url <> "/namespace.cloud.compute.v1beta.CommandService")
+
+      assert {:ok, result} = Namespace.exec(sandbox, "elixir -v", cwd: "/app", env: %{MIX_ENV: "test"})
+      assert result.exit_code == 0
+      assert result.stdout == "hello\n"
+      assert result.stderr == ""
+
+      assert [command_request] = requests(server)
+
+      assert command_request.body == %{
+               "command" => %{
+                 "command" => ["/bin/sh", "-lc", "elixir -v"],
+                 "cwd" => "/app",
+                 "env_vars" => [%{"name" => "MIX_ENV", "value" => "test"}]
+               },
+               "instance_id" => "inst-123",
+               "target_container_name" => "elixir"
+             }
     end
   end
 
